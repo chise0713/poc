@@ -154,21 +154,14 @@ impl Protocol {
         let atyp = buf[0];
         pos += ATYP_LEN;
 
-        let header_len = match atyp {
-            ATYP_IPV4 => ATYP_LEN + IPV4_LEN + PORT_LEN + CHECKSUM_LEN,
-            ATYP_IPV6 => ATYP_LEN + IPV6_LEN + PORT_LEN + CHECKSUM_LEN,
-            ATYP_DOMAIN => {
-                if buf.len() < ATYP_LEN + DOMAIN_LEN_LEN {
-                    return Err(Error::new(ErrorKind::UnexpectedEof, "partial domain len"));
-                }
-
-                let len_bytes = &buf[ATYP_LEN..ATYP_LEN + DOMAIN_LEN_LEN];
-                let domain_len = u16::from_be_bytes(len_bytes.try_into().unwrap()) as usize;
-
-                ATYP_LEN + DOMAIN_LEN_LEN + domain_len + PORT_LEN + CHECKSUM_LEN
+        let header_len = ATYP_LEN
+            + if atyp == ATYP_DOMAIN {
+                DOMAIN_LEN_LEN
+            } else {
+                0
             }
-            _ => return Err(Error::new(ErrorKind::InvalidData, "unknown atyp")),
-        };
+            + Self::addr_len(buf, atyp)?
+            + CHECKSUM_LEN;
 
         if buf.len() < header_len {
             return Err(Error::new(ErrorKind::UnexpectedEof, "buffer too short"));
@@ -226,24 +219,62 @@ impl Protocol {
         ))
     }
 
-    pub fn obfs<F>(buf: &mut [u8], f: F)
+    fn addr_len(buf: &[u8], atyp: u8) -> Result<usize, Error> {
+        Ok(match atyp {
+            ATYP_IPV4 => IPV4_LEN + PORT_LEN,
+            ATYP_IPV6 => IPV6_LEN + PORT_LEN,
+            ATYP_DOMAIN => {
+                if buf.len() < ATYP_LEN + DOMAIN_LEN_LEN {
+                    return Err(Error::new(ErrorKind::UnexpectedEof, "partial domain len"));
+                }
+
+                let len_bytes = &buf[ATYP_LEN..ATYP_LEN + DOMAIN_LEN_LEN];
+                let domain_len = u16::from_be_bytes(len_bytes.try_into().unwrap()) as usize;
+
+                domain_len + PORT_LEN
+            }
+            _ => return Err(Error::new(ErrorKind::InvalidData, "unknown atyp")),
+        })
+    }
+
+    pub fn obfs<F>(buf: &mut [u8], f: F) -> io::Result<()>
     where
         F: FnOnce(&mut [u8]),
     {
-        if buf.len() < 4 {
-            return;
+        if buf.len() < ATYP_LEN {
+            return Err(Error::new(
+                ErrorKind::UnexpectedEof,
+                "buffer too short for atyp",
+            ));
         }
 
-        let split = buf.len() - 4;
-        f(&mut buf[..split]);
+        let atyp = buf[0];
+
+        let addr_len = Self::addr_len(buf, atyp)?;
+
+        let start_offset = if atyp == ATYP_DOMAIN {
+            ATYP_LEN + DOMAIN_LEN_LEN
+        } else {
+            ATYP_LEN
+        };
+
+        let end_offset = start_offset + addr_len;
+
+        if buf.len() < end_offset {
+            return Err(Error::new(ErrorKind::UnexpectedEof, "unexpected EOF"));
+        }
+
+        f(&mut buf[start_offset..end_offset]);
+
+        Ok(())
     }
 
-    pub fn check_chksum(buf: &[u8]) -> bool {
-        if buf.len() < 4 {
+    fn check_chksum(buf: &[u8]) -> bool {
+        if buf.len() < CHECKSUM_LEN {
             return false;
         }
 
-        let split = buf.len() - 4;
+        let split = buf.len() - CHECKSUM_LEN;
         let (data, chksum) = buf.split_at(split);
 
         let Ok(bytes) = chksum.try_into() else {
@@ -341,9 +372,9 @@ mod tests {
 
         let len = Protocol::encode_into(addr, &mut buf).unwrap();
 
-        Protocol::obfs(&mut buf[..len], xor_obfs);
+        Protocol::obfs(&mut buf[..len], xor_obfs).unwrap();
 
-        Protocol::obfs(&mut buf[..len], xor_obfs);
+        Protocol::obfs(&mut buf[..len], xor_obfs).unwrap();
 
         let decoded = Protocol::decode_from(&buf[..len]).unwrap().0;
 
@@ -362,7 +393,7 @@ mod tests {
 
         let len = Protocol::encode_into(Addr::Domain("abc.com", 80), &mut buf).unwrap();
 
-        Protocol::obfs(&mut buf[..len], xor_obfs);
+        Protocol::obfs(&mut buf[..len], xor_obfs).unwrap();
 
         Protocol::decode_from(&buf[..len]).unwrap_err();
     }
