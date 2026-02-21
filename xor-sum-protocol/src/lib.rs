@@ -12,36 +12,51 @@
 //!         o  IP V4 address: X'01'
 //!         o  DOMAINNAME: X'03'
 //!         o  IP V6 address: X'04'
+//!
 //!     o  DST.ADDR desired destination address
 //!     o  DST.PORT desired destination port in network octet order
+//!
 //!     o  CHECKSUM integrity protection field in network octet order
 //!        computed over:
 //!            ATYP + DST.ADDR + DST.PORT
+//!        (before any obfuscation is applied)
+//!
+//! where: DST.ADDR + DST.PORT
+//!
+//!     o  The address field and port field MAY be obfuscated
+//!        using any reversible method (e.g., XOR, substitution,
+//!        lightweight cipher).
+//!
+//!     o  The transformation MUST be lossless and invertible.
+//!
+//!     o  The obfuscation method MUST be agreed upon by both peers.
+//!
+//!     o  If obfuscation is used, the receiver MUST apply the
+//!        inverse transformation before checksum verification.
 //!
 //! where: DST.ADDR
 //!
-//! IP V4:
-//! +------+
-//! |  IP  |
-//! +------+
-//! |  4   |
-//! +------+
+//!     o  IP V4:
+//!         +------+
+//!         |  IP  |
+//!         +------+
+//!         |  4   |
+//!         +------+
 //!
-//! DOMAINNAME:
-//! +--------+------------+
-//! | LENGTH | DOMAINNAME |
-//! +--------+------------+
-//! |   2    |  Variable  |
-//! +--------+------------+
+//!     o  DOMAINNAME:
+//!         +--------+------------+
+//!         | LENGTH | DOMAINNAME |
+//!         +--------+------------+
+//!         |   2    |  Variable  |
+//!         +--------+------------+
 //!
-//! IP V6:
-//! +------+
-//! |  IP  |
-//! +------+
-//! |  16  |
-//! +------+
+//!     o  IP V6:
+//!         +------+
+//!         |  IP  |
+//!         +------+
+//!         |  16  |
+//!         +------+
 //! ```
-//!
 //! This PoC protocol intentionally trades a small amount of computation for a smaller proxy header footprint.
 
 use std::{
