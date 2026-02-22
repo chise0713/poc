@@ -47,7 +47,7 @@
 //!         +--------+------------+
 //!         | LENGTH | DOMAINNAME |
 //!         +--------+------------+
-//!         |   2    |  Variable  |
+//!         |   1    |  Variable  |
 //!         +--------+------------+
 //!
 //!     o  IP V6:
@@ -77,7 +77,7 @@ const ATYP_IPV6: u8 = 0x04;
 
 const ATYP_LEN: usize = 1;
 const PORT_LEN: usize = 2;
-const DOMAIN_LEN_LEN: usize = 2;
+const DOMAIN_LEN_LEN: usize = 1;
 const IPV4_LEN: usize = 4;
 const IPV6_LEN: usize = 16;
 const CHECKSUM_LEN: usize = 4;
@@ -111,10 +111,10 @@ impl Protocol {
 
             Addr::Domain(domain, port) => {
                 let len = domain.len();
-                if len > u16::MAX as usize {
+                if len > u8::MAX as usize {
                     return Err(Error::new(
                         ErrorKind::InvalidData,
-                        "domain len exceed u16::MAX",
+                        "domain len exceed u8::MAX",
                     ));
                 }
 
@@ -123,7 +123,7 @@ impl Protocol {
                 out[pos] = ATYP_DOMAIN;
                 pos += ATYP_LEN;
 
-                out[pos..pos + DOMAIN_LEN_LEN].copy_from_slice(&(len as u16).to_be_bytes());
+                out[pos] = len as u8;
                 pos += DOMAIN_LEN_LEN;
 
                 out[pos..pos + len].copy_from_slice(domain.as_bytes());
@@ -243,8 +243,9 @@ impl Protocol {
                     return Err(Error::new(ErrorKind::UnexpectedEof, "partial domain len"));
                 }
 
-                let len_bytes = &buf[ATYP_LEN..ATYP_LEN + DOMAIN_LEN_LEN];
-                let domain_len = u16::from_be_bytes(len_bytes.try_into().unwrap()) as usize;
+                const DOMAIN_LEN_OFFSET: usize = ATYP_LEN;
+
+                let domain_len = buf[DOMAIN_LEN_OFFSET] as usize;
 
                 domain_len + PORT_LEN
             }
